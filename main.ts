@@ -1,5 +1,6 @@
 //  1. STATE & CONSTANTS
 let level = 1
+let score = 0
 let launcher_angle = 90
 let is_moving = false
 let game_active = false
@@ -20,9 +21,20 @@ let loaded_bubble_sprite = sprites.create(image.create(16, 16), SpriteKind.Playe
 loaded_bubble_sprite.setPosition(80, 110)
 let next_bubble_preview = sprites.create(image.create(16, 16), SpriteKind.Player)
 next_bubble_preview.setPosition(20, 110)
+//  HUD Sprite for Level and Score (Right of the gun)
+let ui_display = sprites.create(image.create(40, 20), SpriteKind.Food)
+ui_display.setPosition(135, 110)
 //  3. HELPER FUNCTIONS
+function update_ui() {
+    //  Clears and redraws the Level/Score legend
+    ui_display.image.fill(0)
+    ui_display.image.print("LV:" + level, 0, 0, 1)
+    ui_display.image.print("SC:" + score, 0, 10, 1)
+}
+
 function get_pos_x(r: number, c: number): number {
-    let x_off = r % 2 == 1 ? 8 : 0
+    //  Hexagonal nesting synchronized with ceiling movement
+    let x_off = (r + ceiling_drops) % 2 == 1 ? 8 : 0
     return c * 16 + 24 + x_off
 }
 
@@ -34,12 +46,11 @@ function draw_launcher() {
     
     launcher.image.fill(0)
     let rad = launcher_angle * (Math.PI / 180)
-    //  Gun barrel
     let x2 = 16 - Math.cos(rad) * 15
     let y2 = 16 - Math.sin(rad) * 15
     launcher.image.drawLine(16, 16, x2, y2, 1)
     launcher.image.fillRect(14, 14, 4, 4, 1)
-    //  PROJECTED PATH (Aiming dots)
+    //  Aiming dots path
     let dot_x = 80
     let dot_y = 110
     let vx = -Math.cos(rad)
@@ -59,9 +70,10 @@ function draw_launcher() {
 }
 
 function create_bubble_img(color: number): Image {
+    //  Precise 16x16 pixels to prevent bubble merging
     let temp_img = image.create(16, 16)
-    temp_img.fillCircle(8, 8, 7, color)
-    temp_img.drawCircle(8, 8, 7, 1)
+    temp_img.fillCircle(7, 7, 7, color)
+    temp_img.drawCircle(7, 7, 7, 1)
     return temp_img
 }
 
@@ -70,35 +82,60 @@ function update_previews() {
     next_bubble_preview.setImage(create_bubble_img(next_color))
     loaded_bubble_sprite.setImage(create_bubble_img(loaded_color))
     draw_launcher()
+    update_ui()
 }
 
-//  4. CEILING LOGIC
-function drop_ceiling() {
-    let b: Sprite;
-    let x_off: any;
+//  4. ANIMATION & CLEANUP
+function drop_bubble(b: Sprite) {
     
-    ceiling_timer = game.runtime()
-    ceiling_drops += 1
-    let all_enemies = sprites.allOfKind(SpriteKind.Enemy)
-    //  Shift existing bubbles down
-    for (let i = 0; i < all_enemies.length; i++) {
-        all_enemies[i].y += 14
-        if (all_enemies[i].y > 100) {
-            handle_game_over()
-            return
+    score += 1
+    //  Each bubble drop scores 1 point
+    b.setKind(SpriteKind.Food)
+    b.vy = 120
+    b.ay = 200
+    b.lifespan = 2000
+    update_ui()
+}
+
+function clean_up_floating() {
+    let b: Sprite;
+    let curr: Sprite;
+    let other: Sprite;
+    let dist: number;
+    let target: Sprite;
+    let connected : Sprite[] = []
+    let queue : Sprite[] = []
+    let all_bubbles = sprites.allOfKind(SpriteKind.Enemy)
+    for (let i = 0; i < all_bubbles.length; i++) {
+        b = all_bubbles[i]
+        if (b.y <= 12) {
+            queue.push(b)
+            connected.push(b)
         }
         
     }
-    //  Add new top row with proper parity offset
-    for (let c = 0; c < 8; c++) {
-        if (Math.percentChance(80)) {
-            b = sprites.create(create_bubble_img(Math.pickRandom(COLORS)), SpriteKind.Enemy)
-            x_off = ceiling_drops % 2 == 1 ? 8 : 0
-            b.setPosition(c * 16 + 24 + x_off, 10)
+    while (queue.length > 0) {
+        curr = queue.shift()
+        for (let j = 0; j < all_bubbles.length; j++) {
+            other = all_bubbles[j]
+            if (connected.indexOf(other) < 0) {
+                dist = Math.sqrt((curr.x - other.x) ** 2 + (curr.y - other.y) ** 2)
+                if (dist < 18) {
+                    connected.push(other)
+                    queue.push(other)
+                }
+                
+            }
+            
+        }
+    }
+    for (let k = 0; k < all_bubbles.length; k++) {
+        target = all_bubbles[k]
+        if (connected.indexOf(target) < 0) {
+            drop_bubble(target)
         }
         
     }
-    music.play(music.melodyPlayable(music.bigCrash), music.PlaybackMode.InBackground)
 }
 
 //  5. CORE LOGIC
@@ -112,10 +149,9 @@ function start_level(lvl: number) {
     ceiling_timer = game.runtime()
     sprites.destroyAllSpritesOfKind(SpriteKind.Enemy)
     scene.backgroundImage().fill(0)
-    //  Randomly generate 2 rows for each of the 1000 levels
     for (let r = 0; r < 2; r++) {
         for (let c = 0; c < 8; c++) {
-            if (Math.percentChance(80)) {
+            if (Math.percentChance(85)) {
                 b = sprites.create(create_bubble_img(Math.pickRandom(COLORS)), SpriteKind.Enemy)
                 b.setPosition(get_pos_x(r, c), get_pos_y(r, c))
             }
@@ -129,7 +165,8 @@ function handle_game_over() {
     
     game_active = false
     is_moving = false
-    game.showLongText("GAME OVER!", DialogLayout.Center)
+    game.showLongText("GAME OVER! SCORE: " + score, DialogLayout.Center)
+    score = 0
     start_level(1)
 }
 
@@ -140,10 +177,9 @@ function handle_collision() {
     
     is_moving = false
     shoot_timer = game.runtime()
-    //  Snap to grid maintaining hexagonal parity
     let row = Math.round((current_bubble.y - 10) / 14)
     let y_target = row * 14 + 10
-    let current_offset = row % 2 != ceiling_drops % 2 ? 8 : 0
+    let current_offset = (row + ceiling_drops) % 2 == 1 ? 8 : 0
     let col = Math.round((current_bubble.x - 24 - current_offset) / 16)
     let x_target = col * 16 + 24 + current_offset
     current_bubble.setPosition(x_target, y_target)
@@ -171,12 +207,11 @@ function handle_collision() {
     if (matches.length >= 3) {
         music.play(music.melodyPlayable(music.baDing), music.PlaybackMode.InBackground)
         for (let p_idx = 0; p_idx < matches.length; p_idx++) {
-            matches[p_idx].setKind(SpriteKind.Food)
-            matches[p_idx].vy = 120
-            matches[p_idx].lifespan = 2000
+            drop_bubble(matches[p_idx])
         }
     }
     
+    clean_up_floating()
     if (current_bubble.y > 100) {
         handle_game_over()
     } else if (sprites.allOfKind(SpriteKind.Enemy).length == 0) {
@@ -189,7 +224,6 @@ function handle_collision() {
 function press_left() {
     
     launcher_angle = Math.clamp(15, 165, launcher_angle - 3)
-    //  Precision rotation
     scene.backgroundImage().fill(0)
     draw_launcher()
 }
@@ -225,12 +259,10 @@ function shoot_action() {
     
 }
 
-//  Default Key Mappings
 controller.left.onEvent(ControllerButtonEvent.Pressed, press_left)
 controller.left.onEvent(ControllerButtonEvent.Repeated, press_left)
 controller.right.onEvent(ControllerButtonEvent.Pressed, press_right)
 controller.right.onEvent(ControllerButtonEvent.Repeated, press_right)
-//  Physical Mapping: Space/Z/X/S/Enter all act as triggers
 controller.A.onEvent(ControllerButtonEvent.Pressed, shoot_action)
 controller.B.onEvent(ControllerButtonEvent.Pressed, shoot_action)
 controller.down.onEvent(ControllerButtonEvent.Pressed, shoot_action)
@@ -241,19 +273,39 @@ controller.menu.onEvent(ControllerButtonEvent.Pressed, function skip_level_handl
 //  7. GAME LOOP
 game.onUpdate(function on_update() {
     let all_enemies: Sprite[];
+    let b: Sprite;
+    let new_off: any;
     
     if (!game_active) {
         return
     }
     
-    //  Auto-shoot (7s)
     if (!is_moving && game.runtime() - shoot_timer > AUTO_SHOOT_LIMIT) {
         shoot_action()
     }
     
-    //  Ceiling drop (20s)
     if (game.runtime() - ceiling_timer > CEILING_DROP_LIMIT) {
-        drop_ceiling()
+        ceiling_timer = game.runtime()
+        ceiling_drops += 1
+        all_enemies = sprites.allOfKind(SpriteKind.Enemy)
+        for (let i = 0; i < all_enemies.length; i++) {
+            all_enemies[i].y += 14
+            if (all_enemies[i].y > 100) {
+                handle_game_over()
+                return
+            }
+            
+        }
+        for (let c = 0; c < 8; c++) {
+            if (Math.percentChance(80)) {
+                b = sprites.create(create_bubble_img(Math.pickRandom(COLORS)), SpriteKind.Enemy)
+                new_off = (0 + ceiling_drops) % 2 == 1 ? 8 : 0
+                b.setPosition(c * 16 + 24 + new_off, 10)
+            }
+            
+        }
+        music.play(music.melodyPlayable(music.bigCrash), music.PlaybackMode.InBackground)
+        clean_up_floating()
     }
     
     if (is_moving && current_bubble) {
