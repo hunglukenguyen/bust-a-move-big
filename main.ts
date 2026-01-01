@@ -3,10 +3,16 @@ let level = 1
 let launcher_angle = 90
 let is_moving = false
 let game_active = false
+let ceiling_drops = 0
 let current_bubble : Sprite = null
 let COLORS = [2, 4, 5, 7, 8, 9]
 let next_color = Math.pickRandom(COLORS)
 let loaded_color = Math.pickRandom(COLORS)
+//  Timers in milliseconds
+let shoot_timer = 0
+let ceiling_timer = 0
+let AUTO_SHOOT_LIMIT = 7000
+let CEILING_DROP_LIMIT = 20000
 //  2. SPRITE DEFINITIONS
 let launcher = sprites.create(image.create(32, 32), SpriteKind.Player)
 launcher.setPosition(80, 110)
@@ -16,13 +22,11 @@ let next_bubble_preview = sprites.create(image.create(16, 16), SpriteKind.Player
 next_bubble_preview.setPosition(20, 110)
 //  3. HELPER FUNCTIONS
 function get_pos_x(r: number, c: number): number {
-    //  Hexagonal nesting for tight packing
     let x_off = r % 2 == 1 ? 8 : 0
     return c * 16 + 24 + x_off
 }
 
 function get_pos_y(r: number, c: number): number {
-    //  Vertical step reduced to 14px so bubbles touch
     return r * 14 + 10
 }
 
@@ -30,78 +34,71 @@ function draw_launcher() {
     
     launcher.image.fill(0)
     let rad = launcher_angle * (Math.PI / 180)
+    //  Gun barrel
     let x2 = 16 - Math.cos(rad) * 15
     let y2 = 16 - Math.sin(rad) * 15
     launcher.image.drawLine(16, 16, x2, y2, 1)
     launcher.image.fillRect(14, 14, 4, 4, 1)
+    //  PROJECTED PATH (Aiming dots)
+    let dot_x = 80
+    let dot_y = 110
+    let vx = -Math.cos(rad)
+    let vy = -Math.sin(rad)
+    for (let i = 0; i < 12; i++) {
+        dot_x += vx * 10
+        dot_y += vy * 10
+        if (dot_x <= 8 || dot_x >= 152) {
+            vx *= -1
+        }
+        
+        if (dot_y > 5 && dot_y < 105) {
+            scene.backgroundImage().setPixel(dot_x, dot_y, 1)
+        }
+        
+    }
 }
 
 function create_bubble_img(color: number): Image {
     let temp_img = image.create(16, 16)
     temp_img.fillCircle(8, 8, 7, color)
     temp_img.drawCircle(8, 8, 7, 1)
-    //  White outline for roundness
     return temp_img
 }
 
 function update_previews() {
     
-    //  FIXED: Using set_image() for Static Python
     next_bubble_preview.setImage(create_bubble_img(next_color))
     loaded_bubble_sprite.setImage(create_bubble_img(loaded_color))
     draw_launcher()
 }
 
-//  4. ANIMATION & CLEANUP
-function drop_bubble(b: Sprite) {
-    b.setKind(SpriteKind.Food)
-    //  Prevents further collisions
-    b.vy = 120
-    b.ay = 200
-    b.lifespan = 2000
-}
-
-function clean_up_floating() {
+//  4. CEILING LOGIC
+function drop_ceiling() {
     let b: Sprite;
-    let curr: Sprite;
-    let other: Sprite;
-    let dist: number;
-    let target: Sprite;
-    let connected : Sprite[] = []
-    let queue : Sprite[] = []
-    let all_bubbles = sprites.allOfKind(SpriteKind.Enemy)
-    //  Index-based loops for Static Python compiler safety
-    for (let i = 0; i < all_bubbles.length; i++) {
-        b = all_bubbles[i]
-        if (b.y <= 12) {
-            queue.push(b)
-            connected.push(b)
+    let x_off: any;
+    
+    ceiling_timer = game.runtime()
+    ceiling_drops += 1
+    let all_enemies = sprites.allOfKind(SpriteKind.Enemy)
+    //  Shift existing bubbles down
+    for (let i = 0; i < all_enemies.length; i++) {
+        all_enemies[i].y += 14
+        if (all_enemies[i].y > 100) {
+            handle_game_over()
+            return
         }
         
     }
-    while (queue.length > 0) {
-        curr = queue.shift()
-        //  Using shift() for Static Python arrays
-        for (let j = 0; j < all_bubbles.length; j++) {
-            other = all_bubbles[j]
-            if (connected.indexOf(other) < 0) {
-                dist = Math.sqrt((curr.x - other.x) ** 2 + (curr.y - other.y) ** 2)
-                if (dist < 18) {
-                    connected.push(other)
-                    queue.push(other)
-                }
-                
-            }
-            
-        }
-    }
-    for (let k = 0; k < all_bubbles.length; k++) {
-        target = all_bubbles[k]
-        if (connected.indexOf(target) < 0) {
-            drop_bubble(target)
+    //  Add new top row with proper parity offset
+    for (let c = 0; c < 8; c++) {
+        if (Math.percentChance(80)) {
+            b = sprites.create(create_bubble_img(Math.pickRandom(COLORS)), SpriteKind.Enemy)
+            x_off = ceiling_drops % 2 == 1 ? 8 : 0
+            b.setPosition(c * 16 + 24 + x_off, 10)
         }
         
     }
+    music.play(music.melodyPlayable(music.bigCrash), music.PlaybackMode.InBackground)
 }
 
 //  5. CORE LOGIC
@@ -110,8 +107,12 @@ function start_level(lvl: number) {
     
     level = lvl
     game_active = true
+    ceiling_drops = 0
+    shoot_timer = game.runtime()
+    ceiling_timer = game.runtime()
     sprites.destroyAllSpritesOfKind(SpriteKind.Enemy)
-    //  Generate 2 rows for each of the 1000 levels
+    scene.backgroundImage().fill(0)
+    //  Randomly generate 2 rows for each of the 1000 levels
     for (let r = 0; r < 2; r++) {
         for (let c = 0; c < 8; c++) {
             if (Math.percentChance(80)) {
@@ -138,10 +139,14 @@ function handle_collision() {
     let d: number;
     
     is_moving = false
+    shoot_timer = game.runtime()
+    //  Snap to grid maintaining hexagonal parity
     let row = Math.round((current_bubble.y - 10) / 14)
-    let col_off = row % 2 == 1 ? 8 : 0
-    let col = Math.round((current_bubble.x - 24 - col_off) / 16)
-    current_bubble.setPosition(get_pos_x(row, col), get_pos_y(row, col))
+    let y_target = row * 14 + 10
+    let current_offset = row % 2 != ceiling_drops % 2 ? 8 : 0
+    let col = Math.round((current_bubble.x - 24 - current_offset) / 16)
+    let x_target = col * 16 + 24 + current_offset
+    current_bubble.setPosition(x_target, y_target)
     current_bubble.setKind(SpriteKind.Enemy)
     current_bubble.setVelocity(0, 0)
     let match_color = current_bubble.image.getPixel(8, 8)
@@ -166,17 +171,15 @@ function handle_collision() {
     if (matches.length >= 3) {
         music.play(music.melodyPlayable(music.baDing), music.PlaybackMode.InBackground)
         for (let p_idx = 0; p_idx < matches.length; p_idx++) {
-            drop_bubble(matches[p_idx])
+            matches[p_idx].setKind(SpriteKind.Food)
+            matches[p_idx].vy = 120
+            matches[p_idx].lifespan = 2000
         }
-        clean_up_floating()
     }
     
     if (current_bubble.y > 100) {
         handle_game_over()
-        return
-    }
-    
-    if (sprites.allOfKind(SpriteKind.Enemy).length == 0) {
+    } else if (sprites.allOfKind(SpriteKind.Enemy).length == 0) {
         start_level(level + 1)
     }
     
@@ -185,13 +188,16 @@ function handle_collision() {
 //  6. INPUT HANDLERS
 function press_left() {
     
-    launcher_angle = Math.clamp(15, 165, launcher_angle - 8)
+    launcher_angle = Math.clamp(15, 165, launcher_angle - 3)
+    //  Precision rotation
+    scene.backgroundImage().fill(0)
     draw_launcher()
 }
 
 function press_right() {
     
-    launcher_angle = Math.clamp(15, 165, launcher_angle + 8)
+    launcher_angle = Math.clamp(15, 165, launcher_angle + 3)
+    scene.backgroundImage().fill(0)
     draw_launcher()
 }
 
@@ -205,7 +211,7 @@ function shoot_action() {
     
     if (!is_moving) {
         is_moving = true
-        //  RESTORED: Shooting sound
+        shoot_timer = game.runtime()
         music.play(music.melodyPlayable(music.pewPew), music.PlaybackMode.InBackground)
         current_bubble = sprites.create(create_bubble_img(loaded_color), SpriteKind.Projectile)
         current_bubble.setPosition(80, 110)
@@ -219,17 +225,16 @@ function shoot_action() {
     
 }
 
-//  Movements (Arrows or WASD)
+//  Default Key Mappings
 controller.left.onEvent(ControllerButtonEvent.Pressed, press_left)
 controller.left.onEvent(ControllerButtonEvent.Repeated, press_left)
 controller.right.onEvent(ControllerButtonEvent.Pressed, press_right)
 controller.right.onEvent(ControllerButtonEvent.Repeated, press_right)
-//  SHOOTING: Space/Z (A), X (B), and S (Down)
+//  Physical Mapping: Space/Z/X/S/Enter all act as triggers
 controller.A.onEvent(ControllerButtonEvent.Pressed, shoot_action)
 controller.B.onEvent(ControllerButtonEvent.Pressed, shoot_action)
 controller.down.onEvent(ControllerButtonEvent.Pressed, shoot_action)
-//  SKIP: Mapped to Menu button (Physical 'Enter' or 'N' key)
-controller.menu.onEvent(ControllerButtonEvent.Pressed, function skip_level() {
+controller.menu.onEvent(ControllerButtonEvent.Pressed, function skip_level_handler() {
     
     start_level(level + 1)
 })
@@ -237,7 +242,21 @@ controller.menu.onEvent(ControllerButtonEvent.Pressed, function skip_level() {
 game.onUpdate(function on_update() {
     let all_enemies: Sprite[];
     
-    if (is_moving && current_bubble && game_active) {
+    if (!game_active) {
+        return
+    }
+    
+    //  Auto-shoot (7s)
+    if (!is_moving && game.runtime() - shoot_timer > AUTO_SHOOT_LIMIT) {
+        shoot_action()
+    }
+    
+    //  Ceiling drop (20s)
+    if (game.runtime() - ceiling_timer > CEILING_DROP_LIMIT) {
+        drop_ceiling()
+    }
+    
+    if (is_moving && current_bubble) {
         if (current_bubble.x <= 8 || current_bubble.x >= 152) {
             current_bubble.vx *= -1
         }
