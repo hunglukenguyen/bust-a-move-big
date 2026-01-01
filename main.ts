@@ -21,19 +21,18 @@ let loaded_bubble_sprite = sprites.create(image.create(16, 16), SpriteKind.Playe
 loaded_bubble_sprite.setPosition(80, 110)
 let next_bubble_preview = sprites.create(image.create(16, 16), SpriteKind.Player)
 next_bubble_preview.setPosition(20, 110)
-//  HUD Sprite for Level and Score (Right of the gun)
+//  HUD Sprite for Level and Score
 let ui_display = sprites.create(image.create(40, 20), SpriteKind.Food)
 ui_display.setPosition(135, 110)
 //  3. HELPER FUNCTIONS
 function update_ui() {
-    //  Clears and redraws the Level/Score legend
     ui_display.image.fill(0)
     ui_display.image.print("LV:" + level, 0, 0, 1)
     ui_display.image.print("SC:" + score, 0, 10, 1)
 }
 
 function get_pos_x(r: number, c: number): number {
-    //  Hexagonal nesting synchronized with ceiling movement
+    //  Hexagonal parity synchronized with ceiling
     let x_off = (r + ceiling_drops) % 2 == 1 ? 8 : 0
     return c * 16 + 24 + x_off
 }
@@ -70,7 +69,6 @@ function draw_launcher() {
 }
 
 function create_bubble_img(color: number): Image {
-    //  Precise 16x16 pixels to prevent bubble merging
     let temp_img = image.create(16, 16)
     temp_img.fillCircle(7, 7, 7, color)
     temp_img.drawCircle(7, 7, 7, 1)
@@ -89,7 +87,7 @@ function update_previews() {
 function drop_bubble(b: Sprite) {
     
     score += 1
-    //  Each bubble drop scores 1 point
+    //  1 point per bubble dropped
     b.setKind(SpriteKind.Food)
     b.vy = 120
     b.ay = 200
@@ -116,11 +114,12 @@ function clean_up_floating() {
     }
     while (queue.length > 0) {
         curr = queue.shift()
+        //  shift() for Static Python
         for (let j = 0; j < all_bubbles.length; j++) {
             other = all_bubbles[j]
             if (connected.indexOf(other) < 0) {
                 dist = Math.sqrt((curr.x - other.x) ** 2 + (curr.y - other.y) ** 2)
-                if (dist < 18) {
+                if (dist < 19) {
                     connected.push(other)
                     queue.push(other)
                 }
@@ -138,8 +137,9 @@ function clean_up_floating() {
     }
 }
 
-//  5. CORE LOGIC
+//  5. EASY LEVEL GENERATION
 function start_level(lvl: number) {
+    let cluster_color: number;
     let b: Sprite;
     
     level = lvl
@@ -150,9 +150,16 @@ function start_level(lvl: number) {
     sprites.destroyAllSpritesOfKind(SpriteKind.Enemy)
     scene.backgroundImage().fill(0)
     for (let r = 0; r < 2; r++) {
+        //  Pick a base color for the row to encourage clusters
+        cluster_color = Math.pickRandom(COLORS)
         for (let c = 0; c < 8; c++) {
             if (Math.percentChance(85)) {
-                b = sprites.create(create_bubble_img(Math.pickRandom(COLORS)), SpriteKind.Enemy)
+                //  75% chance to keep the same color as the neighbor
+                if (!Math.percentChance(75)) {
+                    cluster_color = Math.pickRandom(COLORS)
+                }
+                
+                b = sprites.create(create_bubble_img(cluster_color), SpriteKind.Enemy)
                 b.setPosition(get_pos_x(r, c), get_pos_y(r, c))
             }
             
@@ -178,11 +185,9 @@ function handle_collision() {
     is_moving = false
     shoot_timer = game.runtime()
     let row = Math.round((current_bubble.y - 10) / 14)
-    let y_target = row * 14 + 10
     let current_offset = (row + ceiling_drops) % 2 == 1 ? 8 : 0
     let col = Math.round((current_bubble.x - 24 - current_offset) / 16)
-    let x_target = col * 16 + 24 + current_offset
-    current_bubble.setPosition(x_target, y_target)
+    current_bubble.setPosition(get_pos_x(row, col), row * 14 + 10)
     current_bubble.setKind(SpriteKind.Enemy)
     current_bubble.setVelocity(0, 0)
     let match_color = current_bubble.image.getPixel(8, 8)
@@ -195,7 +200,7 @@ function handle_collision() {
             o = all_enemies[m_idx]
             if (matches.indexOf(o) < 0 && o.image.getPixel(8, 8) == match_color) {
                 d = Math.sqrt((c.x - o.x) ** 2 + (c.y - o.y) ** 2)
-                if (d < 18) {
+                if (d < 19) {
                     matches.push(o)
                     m_queue.push(o)
                 }
@@ -220,10 +225,11 @@ function handle_collision() {
     
 }
 
-//  6. INPUT HANDLERS
+//  6. INPUT HANDLERS (Default Mappings)
 function press_left() {
     
     launcher_angle = Math.clamp(15, 165, launcher_angle - 3)
+    //  High precision
     scene.backgroundImage().fill(0)
     draw_launcher()
 }
@@ -246,6 +252,7 @@ function shoot_action() {
     if (!is_moving) {
         is_moving = true
         shoot_timer = game.runtime()
+        //  7s Reset
         music.play(music.melodyPlayable(music.pewPew), music.PlaybackMode.InBackground)
         current_bubble = sprites.create(create_bubble_img(loaded_color), SpriteKind.Projectile)
         current_bubble.setPosition(80, 110)
@@ -263,9 +270,11 @@ controller.left.onEvent(ControllerButtonEvent.Pressed, press_left)
 controller.left.onEvent(ControllerButtonEvent.Repeated, press_left)
 controller.right.onEvent(ControllerButtonEvent.Pressed, press_right)
 controller.right.onEvent(ControllerButtonEvent.Repeated, press_right)
+//  Shooting: A (Space/Z), B (X/Shift), and Down (S)
 controller.A.onEvent(ControllerButtonEvent.Pressed, shoot_action)
 controller.B.onEvent(ControllerButtonEvent.Pressed, shoot_action)
 controller.down.onEvent(ControllerButtonEvent.Pressed, shoot_action)
+//  Next Level: Menu (N key or Escape)
 controller.menu.onEvent(ControllerButtonEvent.Pressed, function skip_level_handler() {
     
     start_level(level + 1)
@@ -273,6 +282,7 @@ controller.menu.onEvent(ControllerButtonEvent.Pressed, function skip_level_handl
 //  7. GAME LOOP
 game.onUpdate(function on_update() {
     let all_enemies: Sprite[];
+    let new_row_color: number;
     let b: Sprite;
     let new_off: any;
     
@@ -280,10 +290,12 @@ game.onUpdate(function on_update() {
         return
     }
     
+    //  Auto-shoot (7s)
     if (!is_moving && game.runtime() - shoot_timer > AUTO_SHOOT_LIMIT) {
         shoot_action()
     }
     
+    //  Ceiling drop (20s)
     if (game.runtime() - ceiling_timer > CEILING_DROP_LIMIT) {
         ceiling_timer = game.runtime()
         ceiling_drops += 1
@@ -296,10 +308,16 @@ game.onUpdate(function on_update() {
             }
             
         }
+        //  Add new easy cluster row
+        new_row_color = Math.pickRandom(COLORS)
         for (let c = 0; c < 8; c++) {
             if (Math.percentChance(80)) {
-                b = sprites.create(create_bubble_img(Math.pickRandom(COLORS)), SpriteKind.Enemy)
-                new_off = (0 + ceiling_drops) % 2 == 1 ? 8 : 0
+                if (!Math.percentChance(75)) {
+                    new_row_color = Math.pickRandom(COLORS)
+                }
+                
+                b = sprites.create(create_bubble_img(new_row_color), SpriteKind.Enemy)
+                new_off = ceiling_drops % 2 == 1 ? 8 : 0
                 b.setPosition(c * 16 + 24 + new_off, 10)
             }
             

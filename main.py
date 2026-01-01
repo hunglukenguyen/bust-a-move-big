@@ -27,19 +27,18 @@ loaded_bubble_sprite.set_position(80, 110)
 next_bubble_preview = sprites.create(image.create(16, 16), SpriteKind.player)
 next_bubble_preview.set_position(20, 110)
 
-# HUD Sprite for Level and Score (Right of the gun)
+# HUD Sprite for Level and Score
 ui_display = sprites.create(image.create(40, 20), SpriteKind.food)
 ui_display.set_position(135, 110)
 
 # 3. HELPER FUNCTIONS
 def update_ui():
-    # Clears and redraws the Level/Score legend
     ui_display.image.fill(0)
     ui_display.image.print("LV:" + level, 0, 0, 1)
     ui_display.image.print("SC:" + score, 0, 10, 1)
 
 def get_pos_x(r: number, c: number):
-    # Hexagonal nesting synchronized with ceiling movement
+    # Hexagonal parity synchronized with ceiling
     x_off = 8 if ((r + ceiling_drops) % 2 == 1) else 0
     return c * 16 + 24 + x_off
 
@@ -69,7 +68,6 @@ def draw_launcher():
             scene.background_image().set_pixel(dot_x, dot_y, 1)
 
 def create_bubble_img(color: number):
-    # Precise 16x16 pixels to prevent bubble merging
     temp_img = image.create(16, 16)
     temp_img.fill_circle(7, 7, 7, color)
     temp_img.draw_circle(7, 7, 7, 1)
@@ -85,7 +83,7 @@ def update_previews():
 # 4. ANIMATION & CLEANUP
 def drop_bubble(b: Sprite):
     global score
-    score += 1 # Each bubble drop scores 1 point
+    score += 1 # 1 point per bubble dropped
     b.set_kind(SpriteKind.food)
     b.vy = 120
     b.ay = 200
@@ -104,12 +102,12 @@ def clean_up_floating():
             connected.append(b)
             
     while len(queue) > 0:
-        curr = queue.shift()
+        curr = queue.shift() # shift() for Static Python
         for j in range(len(all_bubbles)):
             other = all_bubbles[j]
             if other not in connected:
                 dist = Math.sqrt((curr.x - other.x)**2 + (curr.y - other.y)**2)
-                if dist < 18:
+                if dist < 19:
                     connected.append(other)
                     queue.append(other)
                     
@@ -118,7 +116,7 @@ def clean_up_floating():
         if target not in connected:
             drop_bubble(target)
 
-# 5. CORE LOGIC
+# 5. EASY LEVEL GENERATION
 def start_level(lvl: number):
     global level, game_active, shoot_timer, ceiling_timer, ceiling_drops
     level = lvl
@@ -130,9 +128,14 @@ def start_level(lvl: number):
     scene.background_image().fill(0)
     
     for r in range(2):
+        # Pick a base color for the row to encourage clusters
+        cluster_color = Math.pick_random(COLORS)
         for c in range(8):
             if Math.percent_chance(85):
-                b = sprites.create(create_bubble_img(Math.pick_random(COLORS)), SpriteKind.enemy)
+                # 75% chance to keep the same color as the neighbor
+                if not Math.percent_chance(75):
+                    cluster_color = Math.pick_random(COLORS)
+                b = sprites.create(create_bubble_img(cluster_color), SpriteKind.enemy)
                 b.set_position(get_pos_x(r, c), get_pos_y(r, c))
     update_previews()
 
@@ -150,12 +153,10 @@ def handle_collision():
     shoot_timer = game.runtime()
     
     row = Math.round((current_bubble.y - 10) / 14)
-    y_target = row * 14 + 10
     current_offset = 8 if ((row + ceiling_drops) % 2 == 1) else 0
     col = Math.round((current_bubble.x - 24 - current_offset) / 16)
-    x_target = col * 16 + 24 + current_offset
     
-    current_bubble.set_position(x_target, y_target)
+    current_bubble.set_position(get_pos_x(row, col), row * 14 + 10)
     current_bubble.set_kind(SpriteKind.enemy)
     current_bubble.set_velocity(0, 0)
     
@@ -170,7 +171,7 @@ def handle_collision():
             o = all_enemies[m_idx]
             if o not in matches and o.image.get_pixel(8, 8) == match_color:
                 d = Math.sqrt((c.x - o.x)**2 + (c.y - o.y)**2)
-                if d < 18:
+                if d < 19:
                     matches.append(o)
                     m_queue.append(o)
     
@@ -186,10 +187,10 @@ def handle_collision():
     elif len(sprites.all_of_kind(SpriteKind.enemy)) == 0:
         start_level(level + 1)
 
-# 6. INPUT HANDLERS
+# 6. INPUT HANDLERS (Default Mappings)
 def press_left():
     global launcher_angle
-    launcher_angle = Math.clamp(15, 165, launcher_angle - 3)
+    launcher_angle = Math.clamp(15, 165, launcher_angle - 3) # High precision
     scene.background_image().fill(0)
     draw_launcher()
 
@@ -206,7 +207,7 @@ def shoot_action():
         return
     if not is_moving:
         is_moving = True
-        shoot_timer = game.runtime()
+        shoot_timer = game.runtime() # 7s Reset
         music.play(music.melody_playable(music.pew_pew), music.PlaybackMode.IN_BACKGROUND)
         current_bubble = sprites.create(create_bubble_img(loaded_color), SpriteKind.projectile)
         current_bubble.set_position(80, 110)
@@ -225,9 +226,13 @@ controller.left.on_event(ControllerButtonEvent.PRESSED, press_left)
 controller.left.on_event(ControllerButtonEvent.REPEATED, press_left)
 controller.right.on_event(ControllerButtonEvent.PRESSED, press_right)
 controller.right.on_event(ControllerButtonEvent.REPEATED, press_right)
+
+# Shooting: A (Space/Z), B (X/Shift), and Down (S)
 controller.A.on_event(ControllerButtonEvent.PRESSED, shoot_action)
 controller.B.on_event(ControllerButtonEvent.PRESSED, shoot_action)
 controller.down.on_event(ControllerButtonEvent.PRESSED, shoot_action)
+
+# Next Level: Menu (N key or Escape)
 controller.menu.on_event(ControllerButtonEvent.PRESSED, skip_level_handler)
 
 # 7. GAME LOOP
@@ -236,9 +241,11 @@ def on_update():
     if not game_active:
         return
 
+    # Auto-shoot (7s)
     if not is_moving and (game.runtime() - shoot_timer > AUTO_SHOOT_LIMIT):
         shoot_action()
 
+    # Ceiling drop (20s)
     if game.runtime() - ceiling_timer > CEILING_DROP_LIMIT:
         ceiling_timer = game.runtime()
         ceiling_drops += 1
@@ -248,10 +255,14 @@ def on_update():
             if all_enemies[i].y > 100:
                 handle_game_over()
                 return
+        # Add new easy cluster row
+        new_row_color = Math.pick_random(COLORS)
         for c in range(8):
             if Math.percent_chance(80):
-                b = sprites.create(create_bubble_img(Math.pick_random(COLORS)), SpriteKind.enemy)
-                new_off = 8 if ((0 + ceiling_drops) % 2 == 1) else 0
+                if not Math.percent_chance(75):
+                    new_row_color = Math.pick_random(COLORS)
+                b = sprites.create(create_bubble_img(new_row_color), SpriteKind.enemy)
+                new_off = 8 if (ceiling_drops % 2 == 1) else 0
                 b.set_position(c * 16 + 24 + new_off, 10)
         music.play(music.melody_playable(music.big_crash), music.PlaybackMode.IN_BACKGROUND)
         clean_up_floating()
