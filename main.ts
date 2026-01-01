@@ -22,6 +22,7 @@ function get_pos_x(r: number, c: number): number {
 }
 
 function get_pos_y(r: number, c: number): number {
+    //  Vertical step reduced to 14px so bubbles touch
     return r * 14 + 10
 }
 
@@ -39,11 +40,13 @@ function create_bubble_img(color: number): Image {
     let temp_img = image.create(16, 16)
     temp_img.fillCircle(8, 8, 7, color)
     temp_img.drawCircle(8, 8, 7, 1)
+    //  White outline for roundness
     return temp_img
 }
 
 function update_previews() {
     
+    //  FIXED: Using set_image() for Static Python
     next_bubble_preview.setImage(create_bubble_img(next_color))
     loaded_bubble_sprite.setImage(create_bubble_img(loaded_color))
     draw_launcher()
@@ -52,7 +55,8 @@ function update_previews() {
 //  4. ANIMATION & CLEANUP
 function drop_bubble(b: Sprite) {
     b.setKind(SpriteKind.Food)
-    b.vy = 100
+    //  Prevents further collisions
+    b.vy = 120
     b.ay = 200
     b.lifespan = 2000
 }
@@ -66,6 +70,7 @@ function clean_up_floating() {
     let connected : Sprite[] = []
     let queue : Sprite[] = []
     let all_bubbles = sprites.allOfKind(SpriteKind.Enemy)
+    //  Index-based loops for Static Python compiler safety
     for (let i = 0; i < all_bubbles.length; i++) {
         b = all_bubbles[i]
         if (b.y <= 12) {
@@ -76,7 +81,7 @@ function clean_up_floating() {
     }
     while (queue.length > 0) {
         curr = queue.shift()
-        //  Static Python array management
+        //  Using shift() for Static Python arrays
         for (let j = 0; j < all_bubbles.length; j++) {
             other = all_bubbles[j]
             if (connected.indexOf(other) < 0) {
@@ -106,10 +111,9 @@ function start_level(lvl: number) {
     level = lvl
     game_active = true
     sprites.destroyAllSpritesOfKind(SpriteKind.Enemy)
-    //  Static 2 rows as requested for short console space
+    //  Generate 2 rows for each of the 1000 levels
     for (let r = 0; r < 2; r++) {
         for (let c = 0; c < 8; c++) {
-            //  Randomize position and colors
             if (Math.percentChance(80)) {
                 b = sprites.create(create_bubble_img(Math.pickRandom(COLORS)), SpriteKind.Enemy)
                 b.setPosition(get_pos_x(r, c), get_pos_y(r, c))
@@ -191,12 +195,7 @@ function press_right() {
     draw_launcher()
 }
 
-controller.left.onEvent(ControllerButtonEvent.Pressed, press_left)
-controller.left.onEvent(ControllerButtonEvent.Repeated, press_left)
-controller.right.onEvent(ControllerButtonEvent.Pressed, press_right)
-controller.right.onEvent(ControllerButtonEvent.Repeated, press_right)
-//  Shooting: A (Spacebar)
-controller.A.onEvent(ControllerButtonEvent.Pressed, function shoot_action() {
+function shoot_action() {
     let rad: number;
     
     if (!game_active) {
@@ -206,25 +205,33 @@ controller.A.onEvent(ControllerButtonEvent.Pressed, function shoot_action() {
     
     if (!is_moving) {
         is_moving = true
+        //  RESTORED: Shooting sound
         music.play(music.melodyPlayable(music.pewPew), music.PlaybackMode.InBackground)
         current_bubble = sprites.create(create_bubble_img(loaded_color), SpriteKind.Projectile)
         current_bubble.setPosition(80, 110)
         loaded_color = next_color
         next_color = Math.pickRandom(COLORS)
         rad = launcher_angle * (Math.PI / 180)
-        current_bubble.vx = -Math.cos(rad) * 150
-        current_bubble.vy = -Math.sin(rad) * 150
+        current_bubble.vx = -Math.cos(rad) * 160
+        current_bubble.vy = -Math.sin(rad) * 160
         update_previews()
     }
     
-})
-//  Next Level: B (Maps to 'X' on keyboard)
-controller.B.onEvent(ControllerButtonEvent.Pressed, function skip_level() {
+}
+
+//  Movements (Arrows or WASD)
+controller.left.onEvent(ControllerButtonEvent.Pressed, press_left)
+controller.left.onEvent(ControllerButtonEvent.Repeated, press_left)
+controller.right.onEvent(ControllerButtonEvent.Pressed, press_right)
+controller.right.onEvent(ControllerButtonEvent.Repeated, press_right)
+//  SHOOTING: Space/Z (A), X (B), and S (Down)
+controller.A.onEvent(ControllerButtonEvent.Pressed, shoot_action)
+controller.B.onEvent(ControllerButtonEvent.Pressed, shoot_action)
+controller.down.onEvent(ControllerButtonEvent.Pressed, shoot_action)
+//  SKIP: Mapped to Menu button (Physical 'Enter' or 'N' key)
+controller.menu.onEvent(ControllerButtonEvent.Pressed, function skip_level() {
     
-    if (level < 1000) {
-        start_level(level + 1)
-    }
-    
+    start_level(level + 1)
 })
 //  7. GAME LOOP
 game.onUpdate(function on_update() {

@@ -26,6 +26,7 @@ def get_pos_x(r: number, c: number):
     return c * 16 + 24 + x_off
 
 def get_pos_y(r: number, c: number):
+    # Vertical step reduced to 14px so bubbles touch
     return r * 14 + 10
 
 def draw_launcher():
@@ -40,19 +41,20 @@ def draw_launcher():
 def create_bubble_img(color: number):
     temp_img = image.create(16, 16)
     temp_img.fill_circle(8, 8, 7, color)
-    temp_img.draw_circle(8, 8, 7, 1)
+    temp_img.draw_circle(8, 8, 7, 1) # White outline for roundness
     return temp_img
 
 def update_previews():
     global next_color, loaded_color
+    # FIXED: Using set_image() for Static Python
     next_bubble_preview.set_image(create_bubble_img(next_color))
     loaded_bubble_sprite.set_image(create_bubble_img(loaded_color))
     draw_launcher()
 
 # 4. ANIMATION & CLEANUP
 def drop_bubble(b: Sprite):
-    b.set_kind(SpriteKind.food)
-    b.vy = 100
+    b.set_kind(SpriteKind.food) # Prevents further collisions
+    b.vy = 120
     b.ay = 200
     b.lifespan = 2000
 
@@ -61,6 +63,7 @@ def clean_up_floating():
     queue: List[Sprite] = []
     all_bubbles = sprites.all_of_kind(SpriteKind.enemy)
     
+    # Index-based loops for Static Python compiler safety
     for i in range(len(all_bubbles)):
         b = all_bubbles[i]
         if b.y <= 12:
@@ -68,7 +71,7 @@ def clean_up_floating():
             connected.append(b)
             
     while len(queue) > 0:
-        curr = queue.shift() # Static Python array management
+        curr = queue.shift() # Using shift() for Static Python arrays
         for j in range(len(all_bubbles)):
             other = all_bubbles[j]
             if other not in connected:
@@ -89,10 +92,9 @@ def start_level(lvl: number):
     game_active = True
     sprites.destroy_all_sprites_of_kind(SpriteKind.enemy)
     
-    # Static 2 rows as requested for short console space
+    # Generate 2 rows for each of the 1000 levels
     for r in range(2):
         for c in range(8):
-            # Randomize position and colors
             if Math.percent_chance(80):
                 b = sprites.create(create_bubble_img(Math.pick_random(COLORS)), SpriteKind.enemy)
                 b.set_position(get_pos_x(r, c), get_pos_y(r, c))
@@ -162,30 +164,37 @@ def shoot_action():
         return
     if not is_moving:
         is_moving = True
+        # RESTORED: Shooting sound
         music.play(music.melody_playable(music.pew_pew), music.PlaybackMode.IN_BACKGROUND)
+        
         current_bubble = sprites.create(create_bubble_img(loaded_color), SpriteKind.projectile)
         current_bubble.set_position(80, 110)
+        
         loaded_color = next_color
         next_color = Math.pick_random(COLORS)
+        
         rad = launcher_angle * (Math.PI / 180)
-        current_bubble.vx = -Math.cos(rad) * 150
-        current_bubble.vy = -Math.sin(rad) * 150
+        current_bubble.vx = -Math.cos(rad) * 160
+        current_bubble.vy = -Math.sin(rad) * 160
         update_previews()
 
 def skip_level():
     global level
-    if level < 1000:
-        start_level(level + 1)
+    start_level(level + 1)
 
+# Movements (Arrows or WASD)
 controller.left.on_event(ControllerButtonEvent.PRESSED, press_left)
 controller.left.on_event(ControllerButtonEvent.REPEATED, press_left)
 controller.right.on_event(ControllerButtonEvent.PRESSED, press_right)
 controller.right.on_event(ControllerButtonEvent.REPEATED, press_right)
 
-# Shooting: A (Spacebar)
+# SHOOTING: Space/Z (A), X (B), and S (Down)
 controller.A.on_event(ControllerButtonEvent.PRESSED, shoot_action)
-# Next Level: B (Maps to 'X' on keyboard)
-controller.B.on_event(ControllerButtonEvent.PRESSED, skip_level)
+controller.B.on_event(ControllerButtonEvent.PRESSED, shoot_action)
+controller.down.on_event(ControllerButtonEvent.PRESSED, shoot_action)
+
+# SKIP: Mapped to Menu button (Physical 'Enter' or 'N' key)
+controller.menu.on_event(ControllerButtonEvent.PRESSED, skip_level)
 
 # 7. GAME LOOP
 def on_update():
